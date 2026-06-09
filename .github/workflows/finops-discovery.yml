@@ -1,0 +1,143 @@
+name: FinOps - Discovery Check
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Executa todos os dias às 09h BRT
+    - cron: "0 12 * * *"
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Generate FinOps Discovery Report
+        run: |
+          REPORT_FILE="finops-discovery-report.txt"
+
+          echo "===== FINOPS DISCOVERY CHECK - AWS =====" > $REPORT_FILE
+          echo "Generated at: $(date -u)" >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[EC2 INSTANCES]" >> $REPORT_FILE
+          aws ec2 describe-instances \
+            --query "Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Type:InstanceType,Name:Tags[?Key=='Name']|[0].Value}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[EBS VOLUMES]" >> $REPORT_FILE
+          aws ec2 describe-volumes \
+            --query "Volumes[].{VolumeId:VolumeId,Size:Size,Type:VolumeType,State:State,AttachedInstance:Attachments[0].InstanceId}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[EBS SNAPSHOTS - OWNED BY ME]" >> $REPORT_FILE
+          aws ec2 describe-snapshots \
+            --owner-ids self \
+            --query "Snapshots[].{SnapshotId:SnapshotId,Size:VolumeSize,State:State,StartTime:StartTime}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[ELASTIC IP]" >> $REPORT_FILE
+          aws ec2 describe-addresses \
+            --query "Addresses[].{PublicIp:PublicIp,AllocationId:AllocationId,AssociationId:AssociationId,InstanceId:InstanceId,NetworkInterfaceId:NetworkInterfaceId}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[NAT GATEWAYS]" >> $REPORT_FILE
+          aws ec2 describe-nat-gateways \
+            --query "NatGateways[].{NatGatewayId:NatGatewayId,State:State,VpcId:VpcId,SubnetId:SubnetId}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[LOAD BALANCERS - ALB/NLB]" >> $REPORT_FILE
+          aws elbv2 describe-load-balancers \
+            --query "LoadBalancers[].{Name:LoadBalancerName,Type:Type,State:State.Code,Scheme:Scheme,DNS:DNSName}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[TARGET GROUPS]" >> $REPORT_FILE
+          aws elbv2 describe-target-groups \
+            --query "TargetGroups[].{Name:TargetGroupName,Protocol:Protocol,Port:Port,VpcId:VpcId}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[RDS INSTANCES]" >> $REPORT_FILE
+          aws rds describe-db-instances \
+            --query "DBInstances[].{DB:DBInstanceIdentifier,Status:DBInstanceStatus,Class:DBInstanceClass,Engine:Engine,MultiAZ:MultiAZ,Storage:AllocatedStorage}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[EKS CLUSTERS]" >> $REPORT_FILE
+          aws eks list-clusters \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[ECS CLUSTERS]" >> $REPORT_FILE
+          aws ecs list-clusters \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[LAMBDA FUNCTIONS]" >> $REPORT_FILE
+          aws lambda list-functions \
+            --query "Functions[].{FunctionName:FunctionName,Runtime:Runtime,LastModified:LastModified}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[EVENTBRIDGE RULES]" >> $REPORT_FILE
+          aws events list-rules \
+            --query "Rules[].{Name:Name,State:State,Schedule:ScheduleExpression}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[CLOUDWATCH ALARMS]" >> $REPORT_FILE
+          aws cloudwatch describe-alarms \
+            --query "MetricAlarms[].{Alarm:AlarmName,State:StateValue,ActionsEnabled:ActionsEnabled,Metric:MetricName,Namespace:Namespace}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[CLOUDWATCH LOG GROUPS]" >> $REPORT_FILE
+          aws logs describe-log-groups \
+            --query "logGroups[].{LogGroup:logGroupName,Retention:retentionInDays,StoredBytes:storedBytes}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[S3 BUCKETS]" >> $REPORT_FILE
+          aws s3api list-buckets \
+            --query "Buckets[].{Name:Name,Created:CreationDate}" \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[DYNAMODB TABLES]" >> $REPORT_FILE
+          aws dynamodb list-tables \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "[SNS TOPICS]" >> $REPORT_FILE
+          aws sns list-topics \
+            --output table >> $REPORT_FILE
+          echo "" >> $REPORT_FILE
+
+          echo "===== CHECK FINALIZADO =====" >> $REPORT_FILE
+
+          cat $REPORT_FILE
+
+      - name: Upload FinOps Discovery Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: finops-discovery-report
+          path: finops-discovery-report.txt
+          retention-days: 7
