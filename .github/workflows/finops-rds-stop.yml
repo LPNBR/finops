@@ -2,9 +2,11 @@ name: FinOps - Stop RDS POC
 
 on:
   schedule:
-    # Executa todo dia às 23h BRT
-    # 23h BRT = 02h UTC
-    - cron: "0 2 * * *"
+  # Executa todos os dias às 08h UTC
+  - cron: "0 8 * * *"
+
+  # Executa todos os dias às 20h UTC
+  - cron: "0 20 * * *"
 
   workflow_dispatch:
 
