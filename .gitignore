@@ -1,0 +1,28 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+terraform.rc
+terraform.tfvars
+*.tfvars
+.terraform.lock.hcl
+
+# AWS
+.aws/
+
+# VSCode
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# JSON temporário
+response.json
+bedrock-test.json
