@@ -1,0 +1,112 @@
+name: FinOps - Pause AWS POC
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Todos os dias às 23h BRT
+    - cron: "0 2 * * *"
+
+jobs:
+  pause-poc:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      EC2_INSTANCE_ID: i-09ede75ab466e60c5
+      RDS_INSTANCE_ID: poc-ai-monitoring-mysql
+      LAMBDA_FUNCTION_NAME: poc-ai-monitoring-agent
+      EVENTBRIDGE_RULE_NAME: poc-ai-monitoring-alarm-state-change
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Stop EC2 if running
+        run: |
+          STATUS=$(aws ec2 describe-instances \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --query "Reservations[0].Instances[0].State.Name" \
+            --output text)
+
+          echo "EC2 status atual: $STATUS"
+
+          if [ "$STATUS" = "running" ]; then
+            aws ec2 stop-instances --instance-ids "$EC2_INSTANCE_ID"
+            echo "EC2 enviada para stop."
+          else
+            echo "EC2 não está running. Nenhuma ação necessária."
+          fi
+
+      - name: Stop RDS if available
+        run: |
+          STATUS=$(aws rds describe-db-instances \
+            --db-instance-identifier "$RDS_INSTANCE_ID" \
+            --query "DBInstances[0].DBInstanceStatus" \
+            --output text)
+
+          echo "RDS status atual: $STATUS"
+
+          if [ "$STATUS" = "available" ]; then
+            aws rds stop-db-instance --db-instance-identifier "$RDS_INSTANCE_ID"
+            echo "RDS enviada para stop."
+          else
+            echo "RDS não está available. Nenhuma ação necessária."
+          fi
+
+      - name: Disable EventBridge rule
+        run: |
+          aws events disable-rule --name "$EVENTBRIDGE_RULE_NAME"
+          echo "EventBridge rule desabilitada."
+
+      - name: Set Lambda concurrency to zero
+        run: |
+          aws lambda put-function-concurrency \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --reserved-concurrent-executions 0
+
+          echo "Lambda concurrency definida como 0."
+
+      - name: Disable CloudWatch alarm actions
+        run: |
+          ALARMS=$(aws cloudwatch describe-alarms \
+            --query "MetricAlarms[?contains(AlarmName, 'poc-ai-monitoring')].AlarmName" \
+            --output text)
+
+          if [ -n "$ALARMS" ]; then
+            aws cloudwatch disable-alarm-actions --alarm-names $ALARMS
+            echo "Alarm actions desabilitadas: $ALARMS"
+          else
+            echo "Nenhum alarme poc-ai-monitoring encontrado."
+          fi
+
+      - name: Final validation
+        run: |
+          echo "===== FINOPS PAUSE VALIDATION ====="
+
+          aws ec2 describe-instances \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --query "Reservations[].Instances[].{InstanceId:InstanceId,State:State.Name,Type:InstanceType}" \
+            --output table
+
+          aws rds describe-db-instances \
+            --db-instance-identifier "$RDS_INSTANCE_ID" \
+            --query "DBInstances[].{DB:DBInstanceIdentifier,Status:DBInstanceStatus,Class:DBInstanceClass}" \
+            --output table
+
+          aws lambda get-function-concurrency \
+            --function-name "$LAMBDA_FUNCTION_NAME"
+
+          aws events describe-rule \
+            --name "$EVENTBRIDGE_RULE_NAME" \
+            --query "{Name:Name,State:State}" \
+            --output table
+
+          aws cloudwatch describe-alarms \
+            --query "MetricAlarms[?contains(AlarmName, 'poc-ai-monitoring')].{Alarm:AlarmName,ActionsEnabled:ActionsEnabled,State:StateValue}" \
+            --output table
+
+          echo "===== VALIDATION FINISHED ====="
